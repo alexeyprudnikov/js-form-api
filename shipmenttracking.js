@@ -1,6 +1,6 @@
 /**
  * Form generator class
- * @author: Alexey Prudnikov <aprudnikov@neusta.de>
+ * @author: Alexey Prudnikov <alexey.prudnikov@yahoo.de>
  */
 
 class Form {
@@ -49,7 +49,7 @@ class Form {
             HtmlGenerator.createTagElement('br')
         );
         formElement.appendChild(
-            HtmlGenerator.createInputElement('text', 'number', '', 'F+S Auftragsnummer / Lieferscheinnummer', true)
+            HtmlGenerator.createInputElement('text', 'number', '', 'Auftragsnummer / Lieferscheinnummer', true)
         );
         formElement.appendChild(
             HtmlGenerator.createTagElement('br')
@@ -164,7 +164,7 @@ class Form {
 
                 // show table
                 if(this.tableBlock) {
-                    this.tableBlock.getElementsByTagName('h2')[0].innerHTML = 'Schönen guten Tag KHELLA GmbH & Co. KGaA';
+                    this.tableBlock.getElementsByTagName('h2')[0].innerHTML = 'Schönen guten Tag, Max Mustermann';
                     this.tableBlock.style.display = 'block';
                 }
             };
@@ -182,7 +182,7 @@ class Form {
                     };
 
                     let number = event.target.getAttribute('data-number');
-                    apiObj.get('/users',{ number: number}, this.callbackSimple);
+                    apiObj.get('/tracking',{ number: number}, this.callbackSimple);
                 }
             };
         };
@@ -346,19 +346,13 @@ class Table {
         tr.appendChild(HtmlGenerator.createTagElement('th', 'Bestellt'));
         tr.appendChild(HtmlGenerator.createTagElement('th', 'Lieferscheinnummer'));
         tr.appendChild(HtmlGenerator.createTagElement('th', 'Ihre Bestellung'));
-        tr.appendChild(HtmlGenerator.createTagElement('th', 'F+S Auftragsnummer'));
+        tr.appendChild(HtmlGenerator.createTagElement('th', 'Auftragsnummer'));
         tr.appendChild(HtmlGenerator.createTagElement('th', 'Details'));
 
         tableElement.appendChild(tr);
 
-        let dataArray = [
-            {
-                datum: '25.07.2019 08:44',
-                lnumber: 8855839,
-                bnumber: 3249288245345,
-                anumber: 23452345
-            }
-        ];
+        let dataArray = JSON.parse(json);
+        
         for(let dataSet of dataArray) {
             let tr = HtmlGenerator.createTagElement('tr');
             let lNumber = 0;
