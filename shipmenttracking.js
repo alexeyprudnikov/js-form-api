@@ -1,6 +1,6 @@
 /**
  * Form generator class
- * @author: Alexey Prudnikov <alexey.prudnikov@yahoo.de>
+ * @author: Alexey Prudnikov <aprudnikov@neusta.de>
  */
 
 class Form {
@@ -22,6 +22,7 @@ class Form {
         this.simpleFormContainer = document.getElementById(config.sfC);
         this.detailFormContainer = document.getElementById(config.dfC);
         this.tableContainer = document.getElementById(config.tC);
+        this.paginationContainer = document.getElementById(config.pC);
 
         // remove slash on the end, all endpoint with slash: /users
         let apiUrl = config.apiUrl;
@@ -49,7 +50,7 @@ class Form {
             HtmlGenerator.createTagElement('br')
         );
         formElement.appendChild(
-            HtmlGenerator.createInputElement('text', 'number', '', 'Auftragsnummer / Lieferscheinnummer', true)
+            HtmlGenerator.createInputElement('text', 'number', '', 'Lieferscheinnummer', true)
         );
         formElement.appendChild(
             HtmlGenerator.createTagElement('br')
@@ -70,16 +71,25 @@ class Form {
         // request event
         formElement.onsubmit = (event) => {
             event.preventDefault();
+
+            // lock form
+            this.lockUnlock(formElement, 'lock');
+
             let formData = new FormData(formElement);
 
             let apiObj = new Api(this.apiUrl);
 
             // define request callback
             this.callbackSimple = (json) => {
-                this.popoverElement.update(json);
+                let header = 'Lieferscheinnummer: ' + formData.get('number');
+                let html = OutputDecorator.getShipmentData(json);
+                this.popoverElement.update(header, html);
+                // unlock form
+                this.lockUnlock(formElement);
             };
 
-            apiObj.get('/users', { number: formData.get('number'), plz: formData.get('plz')}, this.callbackSimple);
+            let endpoint = '/delivery/' + formData.get('number') + '/zip/' + formData.get('plz');
+            apiObj.get(endpoint, '', this.callbackSimple);
         };
 
         this.simpleFormContainer.appendChild(formElement);
@@ -111,6 +121,12 @@ class Form {
             return false;
         }
 
+        this.apiToken = '';
+        this.companyName = 'Nutzer';
+        this.companyNumber = 0;
+        this.activePage = 1;
+        this.headerSet = false;
+
         let formElement = HtmlGenerator.createTagElement('form', '', {action: '', method: 'get'});
 
         formElement.appendChild(
@@ -119,12 +135,14 @@ class Form {
         formElement.appendChild(
             HtmlGenerator.createTagElement('br')
         );
+        /*
         formElement.appendChild(
             HtmlGenerator.createInputElement('text', 'name', '', 'Benutzername (optional)')
         );
         formElement.appendChild(
             HtmlGenerator.createTagElement('br')
         );
+        */
         formElement.appendChild(
             HtmlGenerator.createInputElement('text', 'company_number', '', 'Kundennummer', true)
         );
@@ -159,30 +177,98 @@ class Form {
                 }
 
                 let tableObj = new Table();
-                let tableElement = tableObj.generate(json);
-                this.tableContainer.appendChild(tableElement);
+
+                if('data' in json) {
+                    let dataSet = json.data;
+                    // generate table
+                    let tableElement = tableObj.generate(dataSet);
+                    if(this.tableContainer) {
+                        this.tableContainer.innerHTML = '';
+                        this.tableContainer.appendChild(tableElement);
+                    }
+                }
 
                 // show table
                 if(this.tableBlock) {
-                    this.tableBlock.getElementsByTagName('h2')[0].innerHTML = 'Schönen guten Tag, Max Mustermann';
+                    // set header
+                    if(this.headerSet === false) {
+                        this.tableBlock.getElementsByTagName('h2')[0].innerHTML = 'Schönen guten Tag ' + this.companyName;
+                        this.tableBlock.getElementsByTagName('p')[0].innerHTML = 'Ihre Kundennummer: <b>' + this.companyNumber + '</b>';
+                        this.headerSet = true;
+                    }
+                    // pagination
+                    if(this.paginationContainer) {
+                        this.activePage = json.current_page;
+                        if(json.last_page > 1) {
+                            this.paginationContainer.getElementsByTagName('span')[0].innerHTML = 'Seite ' + json.current_page + '/' + json.last_page;
+
+                            this.paginationContainer.getElementsByTagName('a')[0].setAttribute('data-page', '1');
+                            this.paginationContainer.getElementsByTagName('a')[1].setAttribute('data-page', (json.current_page === 1 ) ? '1' : json.current_page - 1);
+                            this.paginationContainer.getElementsByTagName('a')[2].setAttribute('data-page', (json.current_page === json.last_page) ? json.last_page : json.current_page + 1);
+                            this.paginationContainer.getElementsByTagName('a')[3].setAttribute('data-page', json.last_page);
+
+                            if(json.current_page === 1) {
+                                this.paginationContainer.getElementsByTagName('a')[0].classList.add('inactive');
+                                this.paginationContainer.getElementsByTagName('a')[1].classList.add('inactive');
+                            } else {
+                                this.paginationContainer.getElementsByTagName('a')[0].classList.remove('inactive');
+                                this.paginationContainer.getElementsByTagName('a')[1].classList.remove('inactive');
+                            }
+                            if(json.current_page === json.last_page) {
+                                this.paginationContainer.getElementsByTagName('a')[2].classList.add('inactive');
+                                this.paginationContainer.getElementsByTagName('a')[3].classList.add('inactive');
+                            } else {
+                                this.paginationContainer.getElementsByTagName('a')[2].classList.remove('inactive');
+                                this.paginationContainer.getElementsByTagName('a')[3].classList.remove('inactive');
+                            }
+                        }
+                    }
                     this.tableBlock.style.display = 'block';
                 }
             };
 
-            apiObj.post('/auth/login',{ name: formData.get('name'), company_number: formData.get('customer'), password: formData.get('password')}, this.callbackDetail);
+            // define auth callback
+            this.callbackAuth = (data) => {
+                this.apiToken = data.api_token;
+                this.companyName = data.company.company_name;
+                this.companyNumber = data.company.company_number;
+                apiObj.get('/delivery', this.apiToken, this.callbackDetail);
+            };
+
+            // auth request
+            let params = 'company_number=' + formData.get('company_number') + '&password=' + formData.get('password');
+            apiObj.auth('/auth/login', params, this.callbackAuth);
 
             // table info event
             document.onclick = (event) => {
+                // info popup
                 if(event.target.tagName === "A" && event.target.getAttribute('data-number')){
                     event.preventDefault();
 
+                    let number = event.target.getAttribute('data-number');
+
                     // define request callback
                     this.callbackSimple = (json) => {
-                        this.popoverElement.update(json);
+                        let header = 'Lieferscheinnummer: ' + number;
+                        let html = OutputDecorator.getShipmentData(json);
+                        this.popoverElement.update(header, html);
                     };
 
-                    let number = event.target.getAttribute('data-number');
-                    apiObj.get('/tracking',{ number: number}, this.callbackSimple);
+                    let endpoint = '/delivery/' + number;
+                    apiObj.get(endpoint, this.apiToken, this.callbackSimple);
+                }
+                // pagination
+                if(event.target.tagName === "A" && event.target.getAttribute('data-page')){
+                    event.preventDefault();
+
+                    let page = event.target.getAttribute('data-page');
+
+                    if(parseInt(page) === this.activePage) {
+                        return;
+                    }
+
+                    let endpoint = '/delivery?page=' + page;
+                    apiObj.get(endpoint, this.apiToken, this.callbackDetail);
                 }
             };
         };
@@ -208,6 +294,24 @@ class Form {
             return false;
         }
         return true;
+    }
+
+    /**
+     *
+     * @param form
+     * @param flag
+     */
+    lockUnlock(form, flag = '') {
+        let inputs = form.querySelectorAll('input, select, textarea');
+        if(flag === 'lock') {
+            inputs.forEach(function(elem, index) {
+                elem.setAttribute('readonly', true);
+            });
+        } else {
+            inputs.forEach(function(elem, index) {
+                elem.removeAttribute('readonly');
+            });
+        }
     }
 }
 
@@ -278,25 +382,30 @@ class Api {
     /**
      *
      * @param endpoint
-     * @param params
+     * @param api_token
      * @param callback
      */
-    get(endpoint = '', params = {}, callback) {
-        let query = Object.keys(params)
-            .map(k => encodeURIComponent(k) + '=' + encodeURIComponent(params[k]))
-            .join('&');
+    get(endpoint = '', api_token = '', callback) {
+        let url = this.apiUrl + endpoint;
 
-        let url = this.apiUrl + endpoint + '?' + query;
+        if(api_token) {
+            url += ((url.indexOf('?') === -1) ? '?' : '&') + 'api_token=' + api_token;
+        }
 
         fetch(url)
-        .then((response) => response.json())
-        .then((output) => {
-            //console.log(output);
-            callback(output);
-        })
-        .catch((error) => {
-            alert('Error:' + error);
-        });
+            .then((response) => {
+                if(response.status === 200) {
+                    return response.json();
+                }
+                return {};
+            })
+            .then((json) => {
+                //console.log(json);
+                callback(json);
+            })
+            .catch((error) => {
+                callback('Error:' + error);
+            });
     }
 
     /**
@@ -305,20 +414,29 @@ class Api {
      * @param params
      * @param callback
      */
-    post(endpoint = '', params = {}, callback) {
+    auth(endpoint = '', params = '', callback) {
         let url = this.apiUrl + endpoint;
 
         fetch(url, {
             method: 'POST',
             headers: {
-                'Content-Type': 'application/json'
+                'Content-Type': 'application/x-www-form-urlencoded',
             },
-            body: JSON.stringify(params)
+            body: params
         })
-            .then((response) => response.json())
-            .then((output) => {
-                //console.log(output);
-                callback(output);
+            .then((response) => {
+                if(response.status === 200) {
+                    return response.json();
+                }
+                return {};
+            })
+            .then((json) => {
+                if('data' in json && typeof json.data === 'object') {
+                    //console.log(json.data.api_token);
+                    callback(json.data);
+                } else {
+                    alert('Error: falsche Daten eingegeben!');
+                }
             })
             .catch((error) => {
                 alert('Error:' + error);
@@ -336,10 +454,10 @@ class Table {
 
     /**
      *
-     * @param json
+     * @param dataSet
      * @returns {HTMLElement}
      */
-    generate(json) {
+    generate(dataSet = []) {
         let tableElement = HtmlGenerator.createTagElement('table');
 
         let tr = HtmlGenerator.createTagElement('tr');
@@ -351,19 +469,18 @@ class Table {
 
         tableElement.appendChild(tr);
 
-        let dataArray = JSON.parse(json);
-        
-        for(let dataSet of dataArray) {
+        for(let elem of dataSet) {
             let tr = HtmlGenerator.createTagElement('tr');
-            let lNumber = 0;
-            for(let key in dataSet) {
-                if(key === 'lnumber') {
-                    lNumber = dataSet[key];
-                }
-                tr.appendChild(HtmlGenerator.createTagElement('td', dataSet[key]));
-            }
-            let infoLink = HtmlGenerator.createTagElement('a', 'show info', {href: '#', 'data-number': lNumber});
-            tr.appendChild(HtmlGenerator.createTagElement('td').appendChild(infoLink));
+
+            tr.appendChild(HtmlGenerator.createTagElement('td', elem['shipping_note_date']));
+            tr.appendChild(HtmlGenerator.createTagElement('td', elem['shipping_note_number']));
+            tr.appendChild(HtmlGenerator.createTagElement('td', elem['id']));
+            tr.appendChild(HtmlGenerator.createTagElement('td', elem['order_number']));
+
+            let infoTD = HtmlGenerator.createTagElement('td');
+            let infoLink = HtmlGenerator.createTagElement('a', '', {href: '#', 'data-number': elem['shipping_note_number']});
+            infoTD.appendChild(infoLink);
+            tr.appendChild(infoTD);
             tableElement.appendChild(tr);
         }
 
@@ -412,7 +529,7 @@ class Popover {
         };
 
         // header
-        let headerElement = HtmlGenerator.createTagElement('h2', 'Lieferscheinnummer: XXX');
+        let headerElement = HtmlGenerator.createTagElement('h2', 'Informationen');
 
         // data
         let dataElement = HtmlGenerator.createTagElement('div', 'Loading...', {id: 'popOverContent'});
@@ -436,7 +553,7 @@ class Popover {
         this.container.appendChild(innerContainer);
     }
 
-    update(json = {}, header = '') {
+    update(header = '', html = '') {
 
         if(!this.container) {
             this.generate();
@@ -446,7 +563,9 @@ class Popover {
         if(header) {
             innerContainer.getElementsByTagName('h2')[0].innerHTML = header;
         }
-        document.getElementById('popOverContent').innerHTML = JSON.stringify(json);
+        if(html) {
+            document.getElementById('popOverContent').innerHTML = html;
+        }
         this.show();
     }
 
@@ -458,5 +577,52 @@ class Popover {
     hide() {
         this.container.style.pointerEvents = 'none';
         this.container.style.opacity = 0;
+    }
+}
+
+class OutputDecorator {
+
+    /**
+     *
+     * @param data
+     * @returns {string}
+     */
+    static getShipmentData(data) {
+        let output = '';
+        if(typeof data === 'string') {
+            output += data;
+        }
+        if(typeof data === 'object' && 'order_number' in data) {
+            output += OutputDecorator.translate('order_number') + ': <b>' + data.order_number + '</b>';
+        }
+        if('package_information' in data && typeof data.package_information === 'object') {
+            for(let pkg of data.package_information) {
+                output += '<br><br>';
+                output += OutputDecorator.translate('package_information_tracking_number') + ': <b>' + pkg.tracking_number + '</b><br>';
+                output += OutputDecorator.translate('package_information_status_date') + ': <b>' + pkg.status_date + '</b><br>';
+                output += OutputDecorator.translate('package_information_shipping_carrier') + ': <b>' + pkg.shipping_carrier + '</b><br>';
+                output += OutputDecorator.translate('package_information_status_text') + ':<br><b>' + pkg.status_text + '</b>';
+            }
+        }
+        return output ? output : 'Keine Daten gefunden';
+    }
+
+    /**
+     *
+     * @param key
+     * @returns {*}
+     */
+    static translate(key) {
+        let translates = {
+            order_number: 'Auftragsnummer',
+            package_information_tracking_number: 'Ihre Sendungsverfolgungsnummer',
+            package_information_status_date: 'Versendet am',
+            package_information_shipping_carrier: 'Dienstleister',
+            package_information_status_text: 'Letzter Status'
+        };
+        if(key in translates) {
+            return translates[key];
+        }
+        return key;
     }
 }
