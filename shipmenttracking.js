@@ -57,7 +57,7 @@ class Form {
             HtmlGenerator.createTagElement('br')
         );
         formElement.appendChild(
-            HtmlGenerator.createInputElement('text', 'number', '', 'F+S Auftragsnummer / Lieferscheinnummer', 'Auftragsnummer oder Lieferscheinnummer muss angegeben werden.')
+            HtmlGenerator.createInputElement('text', 'number', '', 'Auftragsnummer', 'Auftragsnummer oder Lieferscheinnummer muss angegeben werden.')
         );
         formElement.appendChild(
             HtmlGenerator.createTagElement('br')
@@ -877,7 +877,7 @@ class Table {
             tr.appendChild(HtmlGenerator.createTagElement('th', 'Bestellt'));
             tr.appendChild(HtmlGenerator.createTagElement('th', 'Lieferscheinnummer'));
             tr.appendChild(HtmlGenerator.createTagElement('th', 'Ihre Bestellung'));
-            tr.appendChild(HtmlGenerator.createTagElement('th', 'F+S Auftragsnummer'));
+            tr.appendChild(HtmlGenerator.createTagElement('th', 'Auftragsnummer'));
             tr.appendChild(HtmlGenerator.createTagElement('th', 'Details'));
         }
 
@@ -1158,7 +1158,7 @@ class OutputDecorator {
      */
     static translate(key) {
         let translates = {
-            order_number: 'F+S Auftragsnummer',
+            order_number: 'Auftragsnummer',
             package_information_tracking_number: 'Ihre Sendungsverfolgungsnummer',
             package_information_status_date: 'Versendet am',
             package_information_shipping_carrier: 'Dienstleister',
