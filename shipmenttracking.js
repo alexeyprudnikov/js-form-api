@@ -57,7 +57,7 @@ class Form {
             HtmlGenerator.createTagElement('br')
         );
         formElement.appendChild(
-            HtmlGenerator.createInputElement('text', 'number', '', 'Auftragsnummer', 'Auftragsnummer oder Lieferscheinnummer muss angegeben werden.')
+            HtmlGenerator.createInputElement('text', 'number', '', 'Auftragsnummer / Lieferscheinnummer', 'Auftragsnummer oder Lieferscheinnummer muss angegeben werden.')
         );
         formElement.appendChild(
             HtmlGenerator.createTagElement('br')
@@ -204,7 +204,7 @@ class Form {
                 }
 
                 if(this.tableContainer) {
-                    if(this.responseType === DATA_TYPE_DELIVERY && this.rights_isAdmin()) {
+                    if(this.responseType === DATA_TYPE_DELIVERY && this.rights_isEditor()) {
                         this.tableContainer.appendChild(
                             HtmlGenerator.createInputElement('button', 'showUsers', 'Benutzerverwaltung')
                         );
@@ -213,21 +213,19 @@ class Form {
                         this.tableContainer.appendChild(
                             HtmlGenerator.createInputElement('button', 'showDelivery', 'Lieferungsübersicht')
                         );
-                        if(this.rights_isAdmin()) {
+                        if(this.rights_isEditor()) {
                             this.tableContainer.appendChild(
                                 HtmlGenerator.createInputElement('button', 'addUser', 'Benutzer hinzufügen')
                             );
                         }
                     }
-                    if(this.rights_isEditor()) {
-                        this.tableContainer.appendChild(
-                            HtmlGenerator.createInputElement('button', 'showProfile', 'Profil')
-                        );
+                    this.tableContainer.appendChild(
+                        HtmlGenerator.createInputElement('button', 'editProfile', 'Profil')
+                    );
 
-                        let changePasswordButton = HtmlGenerator.createInputElement('button', 'changeUserPassword', 'Passwort ändern');
-                        changePasswordButton.setAttribute('data-user-id', this.user.id);
-                        this.tableContainer.appendChild(changePasswordButton);
-                    }
+                    let changePasswordButton = HtmlGenerator.createInputElement('button', 'changeUserPassword', 'Passwort ändern');
+                    changePasswordButton.setAttribute('data-user-id', this.user.id);
+                    this.tableContainer.appendChild(changePasswordButton);
 
                     this.tableContainer.appendChild(
                         HtmlGenerator.createInputElement('button', 'logOut', 'Ausloggen')
@@ -244,7 +242,7 @@ class Form {
                     let dataSet = json.data;
                     let isFusa = this.rights_isFuSa();
                     // generate table
-                    let tableElement = Table.generate(dataSet, this.responseType, isFusa);
+                    let tableElement = Table.generate(dataSet, this.responseType, this.user.id, isFusa);
                     if(this.tableContainer) {
                         this.tableContainer.appendChild(tableElement);
                     }
@@ -308,25 +306,20 @@ class Form {
             };
 
             this.callbackAuthError = (text) => {
-                this.popoverElement.update(text);
+                this.popoverElement.update('Fehler!', text);
                 // unlock form
                 Form.lockUnlock(formElement);
             };
 
-            this.callbackPasswordSaved = (text) => {
+            this.callbackPopupUpdate = (text) => {
                 this.popoverElement.initButtons();
                 this.popoverElement.update(null, text);
             };
 
-            this.callbackUserDeactivated = (text) => {
+            this.callbackUserListReload = (text) => {
                 this.popoverElement.initButtons();
                 this.popoverElement.update(null, text);
                 this.apiObj.get('/users', this.user.api_token, this.callbackDetail);
-            };
-
-            this.callbackProfileSaved = (text) => {
-                this.popoverElement.initButtons();
-                this.popoverElement.update(null, text);
             };
 
             // lock form
@@ -340,7 +333,7 @@ class Form {
             this.apiObj.auth('/auth/login', params, this.callbackAuthSuccess, this.callbackAuthError);
 
             // table info event
-            document.onclick = (event) => {
+            this.tableBlock.onclick = (event) => {
                 this.eventHandler(event);
             };
         };
@@ -354,6 +347,14 @@ class Form {
      */
     rights_isEditor() {
         return !!this.user.has_editing_rights;
+    }
+
+    /**
+     *
+     * @returns {boolean}
+     */
+    rights_isOwner() {
+        return (this.user.role === ROLE_COMPANY_OWNER);
     }
 
     /**
@@ -431,208 +432,367 @@ class Form {
      * @param event
      */
     eventHandler(event) {
-        if(event.target.tagName === "A") {
-            event.preventDefault();
-        }
         // info delivery popup
         if(event.target.tagName === "A" && event.target.getAttribute('data-number')){
-
+            event.preventDefault();
             let number = event.target.getAttribute('data-number');
-
-            // define request callback
-            this.callbackSimple = (json) => {
-                let header = 'Lieferscheinnummer: ' + number;
-                let html = OutputDecorator.getShipmentData(json);
-                this.popoverElement.update(header, html);
-            };
-
-            let endpoint = '/delivery/' + number;
-            this.apiObj.get(endpoint, this.user.api_token, this.callbackSimple);
+            this.event_deliveryInfo(number);
         }
         // info user popup
         if(event.target.tagName === "A" && event.target.getAttribute('data-user-id')){
-
+            event.preventDefault();
             let userId = event.target.getAttribute('data-user-id');
-
-            // define request callback
-            this.callbackSimple = (json) => {
-                let header = 'Benutzerinformationen';
-                let html = OutputDecorator.getUserData(json);
-                this.popoverElement.update(header, html);
-            };
-
-            let endpoint = '/users/' + userId;
-            this.apiObj.get(endpoint, this.user.api_token, this.callbackSimple);
+            this.event_userInfo(userId);
         }
         // pagination
         if(event.target.tagName === "A" && event.target.getAttribute('data-page')){
-
+            event.preventDefault();
             let page = event.target.getAttribute('data-page');
-
-            if(parseInt(page) === this.activePage) {
-                return;
-            }
-
-            let endpoint = (this.responseType === DATA_TYPE_USERS ? '/users' : '/delivery') + '?page=' + page;
-            this.apiObj.get(endpoint, this.user.api_token, this.callbackDetail);
+            this.event_Pagination(page);
         }
         // buttons
         if(event.target.tagName === "INPUT" && event.target.getAttribute('type') === 'button') {
+            event.preventDefault();
             let buttonName = event.target.getAttribute('name');
+            let userId = event.target.getAttribute('data-user-id');
             switch(buttonName) {
                 case 'showUsers':
-                    this.apiObj.get('/users', this.user.api_token, this.callbackDetail);
+                    this.event_showUsers();
                     break;
                 case 'showDelivery':
-                    this.apiObj.get('/delivery', this.user.api_token, this.callbackDetail);
+                    this.event_showDelivery();
                     break;
                 case 'changeUserPassword':
-                    let formPasswordElement = HtmlGenerator.createTagElement('form', '', {action: '', method: 'post'});
-                    formPasswordElement.appendChild(
-                        HtmlGenerator.createInputElement('password', 'oldPassword', '', 'Altes Passwort', 'Altes Passwort muss angegeben werden.')
-                    );
-                    formPasswordElement.appendChild(
-                        HtmlGenerator.createTagElement('br')
-                    );
-                    formPasswordElement.appendChild(
-                        HtmlGenerator.createInputElement('password', 'newPassword', '', 'Neues Passwort', 'Neues Passwort muss angegeben werden.')
-                    );
-                    formPasswordElement.appendChild(
-                        HtmlGenerator.createTagElement('br')
-                    );
-                    formPasswordElement.appendChild(
-                        HtmlGenerator.createInputElement('password', 'newPasswordRepeat', '', 'Neues Passwort wiederholen', 'Neues Passwort muss wiederholt werden.')
-                    );
-
-                    let userId = event.target.getAttribute('data-user-id');
-
-                    let callbackSavePassword = () => {
-                        let endPoint = '/users/' + userId + '/password';
-                        let formData = new FormData(formPasswordElement);
-
-                        let oldPassword = formData.get('oldPassword');
-                        let newPassword = formData.get('newPassword');
-                        let newPasswordRepeat = formData.get('newPasswordRepeat');
-                        let errors = this.validateSubmit(formPasswordElement);
-                        if(newPassword !== '' && newPasswordRepeat !== '' && newPassword !== newPasswordRepeat) {
-                            errors.push('Die angegebenen Passwörter stimmen nicht überein.');
-                        }
-                        if(errors.length > 0) {
-                            if(formPasswordElement.querySelector('div[class=errorAlert]')) {
-                                formPasswordElement.querySelector('div[class=errorAlert]').remove();
-                            }
-                            formPasswordElement.prepend(
-                                HtmlGenerator.createTagElement('div', errors.join('</br>') + '<br><br>', {'class': 'errorAlert'})
-                            );
-                            return false;
-                        }
-
-                        let params = 'oldpassword=' + oldPassword + '&newpassword=' + newPassword + '&api_token=' + this.user.api_token;
-
-                        this.apiObj.put(endPoint, params, this.callbackPasswordSaved);
-                    };
-
-                    this.popoverElement.setButtons({'Speichern': callbackSavePassword, 'Abbrechen': this.popoverElement.hide});
-                    let header = (parseInt(userId) === parseInt(this.user.id)) ? 'Eigenes Passwort ändern' : 'Passwort festlegen';
-                    this.popoverElement.update(header, formPasswordElement);
+                    this.event_changeUserPassword(userId);
+                    break;
+                case 'setUserEditor':
+                    let isUserEditor = parseInt(event.target.getAttribute('data-user-editor'));
+                    this.event_setUserEditor(userId, isUserEditor);
                     break;
                 case 'deactivateUser':
                     let userDeactivated = (parseInt(event.target.getAttribute('data-user-active')) === 0);
-                    let txtLock = userDeactivated ? 'entsperren' : 'sperren';
-                    let btnLock = txtLock.charAt(0).toUpperCase() + txtLock.slice(1);
-
-                    let callbackDeactivateUser = () => {
-                        let endPoint = '/users/' + event.target.getAttribute('data-user-id') + (userDeactivated ? '/activate' : '/deactivate');
-                        this.apiObj.postSimple(endPoint, this.user.api_token, this.callbackUserDeactivated)
-                    };
-
-                    this.popoverElement.setButtons({[btnLock]: callbackDeactivateUser, 'Abbrechen': this.popoverElement.hide});
-                    this.popoverElement.update('Konto-Sperrstatus', 'Möchten Sie den Benutzer wirklich ' + txtLock + '?');
+                    this.event_deactivateUser(userId, userDeactivated);
                     break;
                 case 'addUser':
-
+                    this.event_addUser();
                     break;
-                case 'showProfile':
-                    let formProfileElement = HtmlGenerator.createTagElement('form', '', {action: '', method: 'post'});
-                    formProfileElement.appendChild(
-                        HtmlGenerator.createTagElement('div', OutputDecorator.translate('user_name') + ':')
-                    );
-                    formProfileElement.appendChild(
-                        HtmlGenerator.createInputElement('text', 'name', this.user.name, OutputDecorator.translate('user_name'), 'Benutzername muss angegeben werden.')
-                    );
-                    formProfileElement.appendChild(
-                        HtmlGenerator.createTagElement('div', OutputDecorator.translate('user_email') + ':')
-                    );
-                    formProfileElement.appendChild(
-                        HtmlGenerator.createInputElement('text', 'email', this.user.email, OutputDecorator.translate('user_email'), 'Email-Adresse muss angegeben werden.')
-                    );
-                    formProfileElement.appendChild(
-                        HtmlGenerator.createTagElement('div', OutputDecorator.translate('company_number') + ': <b>' + this.user.company_number + '</b>')
-                    );
-                    formProfileElement.appendChild(
-                        HtmlGenerator.createTagElement('div', OutputDecorator.translate('company_name') + ': <b>' + this.user.company_name + '</b>')
-                    );
-                    formProfileElement.appendChild(
-                        HtmlGenerator.createTagElement('div', OutputDecorator.translate('user_has_editing_rights') + ': <b>' + (this.rights_isEditor() ? 'ja' : 'nein') + '</b>')
-                    );
-
-                    let callbackSaveProfile = () => {
-                        let endPoint = '/users/' + this.user.id;
-                        let formData = new FormData(formProfileElement);
-
-                        let profileName = formData.get('name');
-                        let profileEmail = formData.get('email');
-                        let errors = this.validateSubmit(formProfileElement);
-                        if(errors.length > 0) {
-                            if(formProfileElement.querySelector('div[class=errorAlert]')) {
-                                formProfileElement.querySelector('div[class=errorAlert]').remove();
-                            }
-                            formProfileElement.prepend(
-                                HtmlGenerator.createTagElement('div', errors.join('</br>') + '<br><br>', {'class': 'errorAlert'})
-                            );
-                            return false;
-                        }
-                        let params = 'name=' + profileName + '&email=' + profileEmail + '&api_token=' + this.user.api_token;
-                        this.apiObj.put(endPoint, params, this.callbackProfileSaved);
-                    };
-
-                    this.popoverElement.setButtons({'Speichern': callbackSaveProfile, 'Abbrechen': this.popoverElement.hide});
-                    this.popoverElement.update('Profil bearbeiten', formProfileElement);
+                case 'editProfile':
+                    this.event_editCreateProfile();
                     break;
                 case 'logOut':
-                    this.user = {};
-                    if(this.tableContainer) {
-                        while (this.tableContainer.firstChild) {
-                            this.tableContainer.firstChild.remove();
-                        }
-                    }
-                    if(this.paginationContainer) {
-                        this.paginationContainer.getElementsByTagName('span')[0].innerHTML = 'Seite 1/1';
-                        let aElements = this.paginationContainer.querySelectorAll('a');
-                        aElements.forEach(function(elem, index) {
-                            elem.removeAttribute('data-page');
-                            if(elem.classList.contains('inactive') === false) {
-                                elem.classList.add('inactive');
-                            }
-                        });
-                    }
-                    if(this.detailFormContainer) {
-                        let inputDetails = this.detailFormContainer.querySelectorAll('input[type=password]');
-                        inputDetails.forEach(function(elem, index) {
-                            elem.value = '';
-                        });
-                    }
-                    if(this.tableBlock) {
-                        this.headerSet = false;
-                        this.tableBlock.getElementsByTagName('h2')[0].innerHTML = '';
-                        this.tableBlock.getElementsByTagName('p')[0].innerHTML = '';
-                        this.tableBlock.style.display = 'none';
-                    }
-                    if(this.formBlock) {
-                        this.formBlock.style.display = 'block';
-                    }
+                    this.event_logOut();
                     break;
             }
+        }
+    }
+
+    /**
+     *
+     * @param number
+     */
+    event_deliveryInfo(number) {
+        // define request callback
+        this.callbackSimple = (json) => {
+            let header = 'Lieferscheinnummer: ' + number;
+            let html = OutputDecorator.getShipmentData(json);
+            this.popoverElement.update(header, html);
+        };
+
+        let endpoint = '/delivery/' + number;
+        this.apiObj.get(endpoint, this.user.api_token, this.callbackSimple);
+    }
+
+    /**
+     *
+     * @param userId
+     */
+    event_userInfo(userId) {
+        // define request callback
+        this.callbackSimple = (json) => {
+            let header = 'Benutzerinformationen';
+            let html = OutputDecorator.getUserData(json);
+            this.popoverElement.update(header, html);
+        };
+
+        let endpoint = '/users/' + userId;
+        this.apiObj.get(endpoint, this.user.api_token, this.callbackSimple);
+    }
+
+    /**
+     *
+     * @param page
+     */
+    event_Pagination(page) {
+        if(parseInt(page) === this.activePage) {
+            return;
+        }
+        let endpoint = (this.responseType === DATA_TYPE_USERS ? '/users' : '/delivery') + '?page=' + page;
+        this.apiObj.get(endpoint, this.user.api_token, this.callbackDetail);
+    }
+
+    /**
+     *
+     */
+    event_showUsers() {
+        this.apiObj.get('/users', this.user.api_token, this.callbackDetail);
+    }
+
+    /**
+     *
+     */
+    event_showDelivery() {
+        this.apiObj.get('/delivery', this.user.api_token, this.callbackDetail);
+    }
+
+    /**
+     *
+     * @param userId
+     */
+    event_changeUserPassword(userId) {
+        let formPasswordElement = HtmlGenerator.createTagElement('form', '', {action: '', method: 'post'});
+        formPasswordElement.appendChild(
+            HtmlGenerator.createInputElement('password', 'oldPassword', '', 'Altes Passwort', 'Altes Passwort muss angegeben werden.')
+        );
+        formPasswordElement.appendChild(
+            HtmlGenerator.createTagElement('br')
+        );
+        formPasswordElement.appendChild(
+            HtmlGenerator.createInputElement('password', 'newPassword', '', 'Neues Passwort', 'Neues Passwort muss angegeben werden.')
+        );
+        formPasswordElement.appendChild(
+            HtmlGenerator.createTagElement('br')
+        );
+        formPasswordElement.appendChild(
+            HtmlGenerator.createInputElement('password', 'newPasswordRepeat', '', 'Neues Passwort wiederholen', 'Neues Passwort muss wiederholt werden.')
+        );
+
+        let callbackSavePassword = () => {
+            let endPoint = '/users/' + userId + '/password';
+            let formData = new FormData(formPasswordElement);
+
+            let oldPassword = formData.get('oldPassword');
+            let newPassword = formData.get('newPassword');
+            let newPasswordRepeat = formData.get('newPasswordRepeat');
+            let errors = this.validateSubmit(formPasswordElement);
+            if(newPassword !== '' && newPasswordRepeat !== '' && newPassword !== newPasswordRepeat) {
+                errors.push('Die angegebenen Passwörter stimmen nicht überein.');
+            }
+            if(errors.length > 0) {
+                if(formPasswordElement.querySelector('div[class=errorAlert]')) {
+                    formPasswordElement.querySelector('div[class=errorAlert]').remove();
+                }
+                formPasswordElement.prepend(
+                    HtmlGenerator.createTagElement('div', errors.join('</br>') + '<br><br>', {'class': 'errorAlert'})
+                );
+                return false;
+            }
+
+            let params = 'oldpassword=' + oldPassword + '&newpassword=' + newPassword + '&api_token=' + this.user.api_token;
+
+            this.apiObj.editPassword(endPoint, params, this.callbackPopupUpdate);
+        };
+
+        this.popoverElement.setButtons({'Speichern': callbackSavePassword, 'Abbrechen': this.popoverElement.hide});
+        let header = (parseInt(userId) === parseInt(this.user.id)) ? 'Eigenes Passwort ändern' : 'Passwort festlegen';
+        this.popoverElement.update(header, formPasswordElement);
+    }
+
+    /**
+     *
+     * @param userId
+     * @param isUserEditor
+     */
+    event_setUserEditor(userId, isUserEditor) {
+        let txtEditor = isUserEditor === 1 ? 'entziehen' : 'erteilen';
+        let btnEditor = txtEditor.charAt(0).toUpperCase() + txtEditor.slice(1);
+
+        let callbackSetUserEditor = () => {
+            let endPoint = '/users/' + userId + '/change-role';
+            this.apiObj.setUserEditor(endPoint, this.user.api_token, isUserEditor, this.callbackUserListReload)
+        };
+
+        this.popoverElement.setButtons({[btnEditor]: callbackSetUserEditor, 'Abbrechen': this.popoverElement.hide});
+        this.popoverElement.update('Benutzerverwaltung', 'Möchten Sie dem Benutzer die Benutzerverwaltungsrechte ' + txtEditor + '?');
+    }
+
+    /**
+     *
+     * @param userId
+     * @param userDeactivated
+     */
+    event_deactivateUser(userId, userDeactivated) {
+        let txtLock = userDeactivated ? 'entsperren' : 'sperren';
+        let btnLock = txtLock.charAt(0).toUpperCase() + txtLock.slice(1);
+
+        let callbackDeactivateUser = () => {
+            let endPoint = '/users/' + userId + (userDeactivated ? '/activate' : '/deactivate');
+            this.apiObj.deactivateUser(endPoint, this.user.api_token, this.callbackUserListReload)
+        };
+
+        this.popoverElement.setButtons({[btnLock]: callbackDeactivateUser, 'Abbrechen': this.popoverElement.hide});
+        this.popoverElement.update('Konto-Sperrstatus', 'Möchten Sie den Benutzer wirklich ' + txtLock + '?');
+    }
+
+    /**
+     *
+     */
+    event_addUser() {
+        this.event_editCreateProfile(true);
+    }
+
+    /**
+     *
+     */
+    event_editCreateProfile(isNew = false) {
+        let formProfileElement = HtmlGenerator.createTagElement('form', '', {action: '', method: 'post'});
+        if(isNew && this.rights_isFuSa()) {
+            formProfileElement.appendChild(
+                HtmlGenerator.createTagElement('div', OutputDecorator.translate('company_number') + ':')
+            );
+            formProfileElement.appendChild(
+                HtmlGenerator.createInputElement('text', 'companyNumber', this.user.company.company_number, OutputDecorator.translate('company_number'), 'Kundennummer muss angegeben werden.')
+            );
+        } else {
+            formProfileElement.appendChild(
+                HtmlGenerator.createTagElement('div', OutputDecorator.translate('company_number') + ': <b>' + this.user.company.company_number + '</b>')
+            );
+            formProfileElement.appendChild(
+                HtmlGenerator.createTagElement('div', OutputDecorator.translate('company_name') + ': <b>' + this.user.company.company_name + '</b>')
+            );
+        }
+        formProfileElement.appendChild(
+            HtmlGenerator.createTagElement('br')
+        );
+        if(isNew || this.user.name) {
+            formProfileElement.appendChild(
+                HtmlGenerator.createTagElement('div', OutputDecorator.translate('user_name') + ':')
+            );
+            formProfileElement.appendChild(
+                HtmlGenerator.createInputElement('text', 'name', isNew ? '' : this.user.name, OutputDecorator.translate('user_name'), 'Benutzername muss angegeben werden.')
+            );
+            formProfileElement.appendChild(
+                HtmlGenerator.createTagElement('br')
+            );
+        }
+        if(isNew || this.user.email) {
+            formProfileElement.appendChild(
+                HtmlGenerator.createTagElement('div', OutputDecorator.translate('user_email') + ':')
+            );
+            formProfileElement.appendChild(
+                HtmlGenerator.createInputElement('text', 'email', isNew ? '' : this.user.email, OutputDecorator.translate('user_email'), 'Email-Adresse muss angegeben werden.')
+            );
+            formProfileElement.appendChild(
+                HtmlGenerator.createTagElement('br')
+            );
+        }
+        if(isNew) {
+            formProfileElement.appendChild(
+                HtmlGenerator.createTagElement('div','Passwort:')
+            );
+            formProfileElement.appendChild(
+                HtmlGenerator.createInputElement('password', 'password', '', 'Passwort', 'Passwort muss angegeben werden.')
+            );
+            formProfileElement.appendChild(
+                HtmlGenerator.createTagElement('div','Passwort wiederholen:')
+            );
+            formProfileElement.appendChild(
+                HtmlGenerator.createInputElement('password', 'passwordRepeat', '', 'Passwort wiederholen', 'Passwort muss wiederholt werden.')
+            );
+            formProfileElement.appendChild(
+                HtmlGenerator.createTagElement('br')
+            );
+        }
+        // checkbox
+        formProfileElement.appendChild(
+            HtmlGenerator.createTagElement('span', OutputDecorator.translate('user_has_editing_rights') + ': ')
+        );
+        let editorCheckbox = HtmlGenerator.createInputElement('checkbox', 'isEditor', 1);
+        if(isNew !== true) {
+            if(this.user.has_editing_rights) {
+                editorCheckbox.setAttribute('checked', 'checked');
+            }
+            editorCheckbox.setAttribute('disabled', 'disabled');
+        }
+        formProfileElement.appendChild(editorCheckbox);
+        formProfileElement.appendChild(
+            HtmlGenerator.createTagElement('span', ' ja')
+        );
+
+        let callbackSaveProfile = () => {
+            let formData = new FormData(formProfileElement);
+
+            let profileName = formData.get('name');
+            let profileEmail = formData.get('email');
+            let profilePassword = formData.get('password');
+            let errors = this.validateSubmit(formProfileElement);
+            if(isNew) {
+                let profilePasswordRepeat = formData.get('passwordRepeat');
+                if(profilePassword !== '' && profilePasswordRepeat !== '' && profilePassword !== profilePasswordRepeat) {
+                    errors.push('Die angegebenen Passwörter stimmen nicht überein.');
+                }
+            }
+            if(errors.length > 0) {
+                if(formProfileElement.querySelector('div[class=errorAlert]')) {
+                    formProfileElement.querySelector('div[class=errorAlert]').remove();
+                }
+                formProfileElement.prepend(
+                    HtmlGenerator.createTagElement('div', errors.join('</br>') + '<br><br>', {'class': 'errorAlert'})
+                );
+                return false;
+            }
+
+            if(isNew) {
+                let endPoint = '/users';
+                let companyNumber = this.rights_isFuSa() ? formData.get('companyNumber') : this.user.company.company_number;
+                let isEditor = formData.get('isEditor');
+                let params = 'company_number=' + companyNumber + '&name=' + profileName + '&email=' + profileEmail + '&has_editing_rights=' + isEditor + '&password=' + profilePassword + '&api_token=' + this.user.api_token;
+                this.apiObj.createUser(endPoint, params, this.callbackPopupUpdate);
+            } else {
+                let endPoint = '/users/' + this.user.id;
+                let params = 'name=' + profileName + '&email=' + profileEmail + '&password=1&api_token=' + this.user.api_token;
+                this.apiObj.editUser(endPoint, params, this.callbackPopupUpdate);
+            }
+        };
+
+        this.popoverElement.setButtons({'Speichern': callbackSaveProfile, 'Abbrechen': this.popoverElement.hide});
+        let header = isNew ? 'Benutzer hinzufügen' : 'Profil';
+        this.popoverElement.update(header, formProfileElement);
+    }
+
+    /**
+     *
+     */
+    event_logOut() {
+        this.user = {};
+        if(this.tableContainer) {
+            while (this.tableContainer.firstChild) {
+                this.tableContainer.firstChild.remove();
+            }
+        }
+        if(this.paginationContainer) {
+            this.paginationContainer.getElementsByTagName('span')[0].innerHTML = 'Seite 1/1';
+            let aElements = this.paginationContainer.querySelectorAll('a');
+            aElements.forEach(function(elem, index) {
+                elem.removeAttribute('data-page');
+                if(elem.classList.contains('inactive') === false) {
+                    elem.classList.add('inactive');
+                }
+            });
+        }
+        if(this.detailFormContainer) {
+            let inputDetails = this.detailFormContainer.querySelectorAll('input[type=password]');
+            inputDetails.forEach(function(elem, index) {
+                elem.value = '';
+            });
+        }
+        if(this.tableBlock) {
+            this.headerSet = false;
+            this.tableBlock.getElementsByTagName('h2')[0].innerHTML = '';
+            this.tableBlock.getElementsByTagName('p')[0].innerHTML = '';
+            this.tableBlock.style.display = 'none';
+        }
+        if(this.formBlock) {
+            this.formBlock.style.display = 'block';
         }
     }
 }
@@ -746,7 +906,7 @@ class Api {
      * @param api_token
      * @param callback
      */
-    postSimple(endpoint = '', api_token = '', callback) {
+    deactivateUser(endpoint = '', api_token = '', callback) {
         let url = this.apiUrl + endpoint;
 
         fetch(url, {
@@ -770,10 +930,50 @@ class Api {
     /**
      *
      * @param endpoint
+     * @param api_token
+     * @param has_editing_rights
+     * @param callback
+     */
+    setUserEditor(endpoint = '', api_token = '', has_editing_rights = 1, callback) {
+        let url = this.apiUrl + endpoint;
+
+        fetch(url, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+            },
+            body: 'api_token=' + api_token + '&has_editing_rights=' + (1 - has_editing_rights)
+        })
+            .then((response) => {
+                return response.json();
+            })
+            .then((json) => {
+                let response = '';
+                if(json.message && json.errors) {
+                    response = 'Fehler!';
+                    response += '<br>';
+                    response += json.message;
+                    if('has_editing_rights' in json.errors) {
+                        response += '<br>';
+                        response += json.errors.has_editing_rights;
+                    }
+                } else {
+                    response = 'Die gewünschten Änderungen wurden erfolgreich gespeichert.';
+                }
+                callback(response);
+            })
+            .catch((error) => {
+                callback('Fehler! ' + error);
+            });
+    }
+
+    /**
+     *
+     * @param endpoint
      * @param params
      * @param callback
      */
-    post(endpoint = '', params = '', callback) {
+    createUser(endpoint = '', params = '', callback) {
         let url = this.apiUrl + endpoint;
 
         fetch(url, {
@@ -787,7 +987,21 @@ class Api {
                 return response.json();
             })
             .then((json) => {
-                callback(json);
+                let response = '';
+                if(json.message && json.errors) {
+                    response = 'Fehler!';
+                    if('name' in json.errors) {
+                        response += '<br>';
+                        response += json.errors.name[0];
+                    }
+                    if('email' in json.errors) {
+                        response += '<br>';
+                        response += json.errors.email[0];
+                    }
+                } else {
+                    response = 'Neuer Benutzer <b>' + json.data.name + '</b> [' + json.data.email + '] wurde erfolgreich hinzufügt.';
+                }
+                callback(response);
             })
             .catch((error) => {
                 callback('Fehler! ' + error);
@@ -800,7 +1014,7 @@ class Api {
      * @param params
      * @param callback
      */
-    put(endpoint = '', params = '', callback) {
+    editPassword(endpoint = '', params = '', callback) {
         let url = this.apiUrl + endpoint;
 
         fetch(url, {
@@ -811,10 +1025,61 @@ class Api {
             body: params
         })
             .then((response) => {
-                return response.text();
+                return response.json();
             })
             .then((json) => {
-                callback(json);
+                let response = '';
+                if(json.message) {
+                    response = 'Fehler!';
+                    response += '<br>';
+                    response += 'Ihnen fehlt die Berechtigung, den Vorgang abzuschließen.';
+                    response += '<br>';
+                    response += json.message + '.';
+                } else {
+                    response = 'Die gewünschten Änderungen wurden erfolgreich gespeichert.';
+                }
+                callback(response);
+            })
+            .catch((error) => {
+                callback('Fehler! ' + error);
+            });
+    }
+
+    /**
+     *
+     * @param endpoint
+     * @param params
+     * @param callback
+     */
+    editUser(endpoint = '', params = '', callback) {
+        let url = this.apiUrl + endpoint;
+
+        fetch(url, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+            },
+            body: params
+        })
+            .then((response) => {
+                return response.json();
+            })
+            .then((json) => {
+                let response = '';
+                if(json.message && json.errors) {
+                    response = 'Fehler!';
+                    if('name' in json.errors) {
+                        response += '<br>';
+                        response += json.errors.name[0];
+                    }
+                    if('email' in json.errors) {
+                        response += '<br>';
+                        response += json.errors.email[0];
+                    }
+                } else {
+                    response = 'Die gewünschten Änderungen wurden erfolgreich gespeichert.';
+                }
+                callback(response);
             })
             .catch((error) => {
                 callback('Fehler! ' + error);
@@ -832,12 +1097,12 @@ class Api {
         let url = this.apiUrl + endpoint;
 
         fetch(url, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/x-www-form-urlencoded',
-                },
-                body: params
-            })
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+            },
+            body: params
+        })
             .then((response) => {
                 if(response.status === 200) {
                     return response.json();
@@ -864,16 +1129,20 @@ class Table {
      *
      * @param dataSet
      * @param type
+     * @param userId
      * @param isFuSa
      * @returns {HTMLElement}
      */
-    static generate(dataSet = [], type = DATA_TYPE_DELIVERY, isFuSa = false) {
+    static generate(dataSet = [], type = DATA_TYPE_DELIVERY, userId = 0, isFuSa = false) {
 
         let tableElement = HtmlGenerator.createTagElement('table');
 
         let tr = HtmlGenerator.createTagElement('tr');
 
         if(type === DATA_TYPE_DELIVERY) {
+            if(isFuSa) {
+                tr.appendChild(HtmlGenerator.createTagElement('th', 'Kunde'));
+            }
             tr.appendChild(HtmlGenerator.createTagElement('th', 'Bestellt'));
             tr.appendChild(HtmlGenerator.createTagElement('th', 'Lieferscheinnummer'));
             tr.appendChild(HtmlGenerator.createTagElement('th', 'Ihre Bestellung'));
@@ -883,13 +1152,13 @@ class Table {
 
         if(type === DATA_TYPE_USERS) {
             if(isFuSa) {
-                tr.appendChild(HtmlGenerator.createTagElement('th', 'Kundennummer'));
-                tr.appendChild(HtmlGenerator.createTagElement('th', 'Kundenname'));
+                tr.appendChild(HtmlGenerator.createTagElement('th', 'Nummer'));
+                tr.appendChild(HtmlGenerator.createTagElement('th', 'Firma'));
             }
-            tr.appendChild(HtmlGenerator.createTagElement('th', 'Benutzername'));
-            tr.appendChild(HtmlGenerator.createTagElement('th', 'Email-Adresse'));
-            tr.appendChild(HtmlGenerator.createTagElement('th', 'Bearbeiter'));
+            tr.appendChild(HtmlGenerator.createTagElement('th', 'Name'));
+            tr.appendChild(HtmlGenerator.createTagElement('th', 'E-Mail'));
             tr.appendChild(HtmlGenerator.createTagElement('th', 'Passwort'));
+            tr.appendChild(HtmlGenerator.createTagElement('th', 'Benutzerverwaltung'));
             tr.appendChild(HtmlGenerator.createTagElement('th', 'Sperrstatus'));
             tr.appendChild(HtmlGenerator.createTagElement('th', 'Details'));
         }
@@ -900,6 +1169,11 @@ class Table {
             let tr = HtmlGenerator.createTagElement('tr');
 
             if(type === DATA_TYPE_DELIVERY) {
+
+                if(isFuSa) {
+                    tr.appendChild(HtmlGenerator.createTagElement('td', elem['company_number'] + '<br>' + elem['company_name_1']));
+                }
+
                 tr.appendChild(HtmlGenerator.createTagElement('td', elem['shipping_note_date']));
                 tr.appendChild(HtmlGenerator.createTagElement('td', elem['shipping_note_number']));
                 tr.appendChild(HtmlGenerator.createTagElement('td', elem['id']));
@@ -914,26 +1188,38 @@ class Table {
             if(type === DATA_TYPE_USERS) {
 
                 if(isFuSa) {
-                    tr.appendChild(HtmlGenerator.createTagElement('td', elem['company']['company_number'] ? elem['company']['company_number'] : '-'));
-                    tr.appendChild(HtmlGenerator.createTagElement('td', elem['company']['company_name'] ? elem['company']['company_name'] : '-'));
+                    tr.appendChild(HtmlGenerator.createTagElement('td', elem['company']['company_number']));
+                    tr.appendChild(HtmlGenerator.createTagElement('td', elem['company']['company_name']));
                 }
 
                 tr.appendChild(HtmlGenerator.createTagElement('td', elem['name'] ? elem['name'] : '-'));
                 tr.appendChild(HtmlGenerator.createTagElement('td', elem['email'] ? elem['email'] : '-'));
-                tr.appendChild(HtmlGenerator.createTagElement('td', elem['has_editing_rights'] ? 'ja' : 'nein'));
 
-                let passwordUserTD = HtmlGenerator.createTagElement('td');
-                let passwordButton = HtmlGenerator.createInputElement('button', 'changeUserPassword', 'festlegen');
-                passwordButton.setAttribute('data-user-id', elem['id']);
-                passwordUserTD.appendChild(passwordButton);
-                tr.appendChild(passwordUserTD);
+                if(elem['id'] !== userId) {
+                    let passwordUserTD = HtmlGenerator.createTagElement('td');
+                    let passwordButton = HtmlGenerator.createInputElement('button', 'changeUserPassword', 'festlegen');
+                    passwordButton.setAttribute('data-user-id', elem['id']);
+                    passwordUserTD.appendChild(passwordButton);
+                    tr.appendChild(passwordUserTD);
 
-                let lockUserTD = HtmlGenerator.createTagElement('td');
-                let lockUserButton = HtmlGenerator.createInputElement('button', 'deactivateUser', elem['deactivated_at'] ? 'entsperren' : 'sperren');
-                lockUserButton.setAttribute('data-user-id', elem['id']);
-                lockUserButton.setAttribute('data-user-active', elem['deactivated_at'] ? '0' : '1');
-                lockUserTD.appendChild(lockUserButton);
-                tr.appendChild(lockUserTD);
+                    let editUserTD = HtmlGenerator.createTagElement('td');
+                    let editUserButton = HtmlGenerator.createInputElement('button', 'setUserEditor', elem['has_editing_rights'] ? 'entziehen' : 'erteilen');
+                    editUserButton.setAttribute('data-user-id', elem['id']);
+                    editUserButton.setAttribute('data-user-editor', elem['has_editing_rights'] ? '1' : '0');
+                    editUserTD.appendChild(editUserButton);
+                    tr.appendChild(editUserTD);
+
+                    let lockUserTD = HtmlGenerator.createTagElement('td');
+                    let lockUserButton = HtmlGenerator.createInputElement('button', 'deactivateUser', elem['deactivated_at'] ? 'entsperren' : 'sperren');
+                    lockUserButton.setAttribute('data-user-id', elem['id']);
+                    lockUserButton.setAttribute('data-user-active', elem['deactivated_at'] ? '0' : '1');
+                    lockUserTD.appendChild(lockUserButton);
+                    tr.appendChild(lockUserTD);
+                } else {
+                    tr.appendChild(HtmlGenerator.createTagElement('td', '-'));
+                    tr.appendChild(HtmlGenerator.createTagElement('td', '-'));
+                    tr.appendChild(HtmlGenerator.createTagElement('td', '-'));
+                }
 
                 let infoTD = HtmlGenerator.createTagElement('td');
                 let infoLink = HtmlGenerator.createTagElement('a', '', {href: '#', 'data-user-id': elem['id']});
@@ -1166,7 +1452,7 @@ class OutputDecorator {
             company_number: 'Kundennummer',
             company_name: 'Kundenname',
             user_name: 'Benutzername',
-            user_email: 'Email-Adresse',
+            user_email: 'E-Mail-Adresse',
             user_has_editing_rights: 'Benutzerverwaltung',
             user_role: 'Benutzerrolle',
             user_deactivated_at: 'Gesperrt'
